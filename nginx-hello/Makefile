@@ -6,5 +6,5 @@ install:
 	pip install html_linter
 lint:
 	# run lint
-	~/.hadolint Dockerfile
+	./hadolint Dockerfile
 	html_lint.py index.html
