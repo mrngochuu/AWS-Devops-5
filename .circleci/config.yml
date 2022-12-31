@@ -65,6 +65,16 @@ jobs:
   deploy-infrastructure:
     docker:
       - image: python:3.11-rc-alpine
+    parameters:
+      cluster-name:
+        description: |
+          Name of the EKS cluster
+        type: string
+      aws-region:
+        description: |
+          AWS region
+        type: string
+        default: "us-east-1"
     steps:
       - checkout
       - restore_cache:
