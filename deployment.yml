@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: final-project
+  labels:
+    app: final-capstone
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: final-capstone
+  template:
+    metadata:
+      labels:
+        app: final-capstone
+    spec:
+      containers:
+      - name: web
+        image: 162501986873.dkr.ecr.us-east-1.amazonaws.com/pythonhello-app
+        ports:
+          - name: web
+            containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-loadbalance
+spec:
+  selector:
+    app: final-capstone
+  type: LoadBalancer
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
