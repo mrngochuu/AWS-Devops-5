@@ -1,4 +1,6 @@
-<include a CircleCI status badge, here>
+<h1>Capstone</h1>
+
+[![CircleCI](https://dl.circleci.com/status-badge/img/gh/HungNguyen686868/kubenetes/tree/main.svg?style=svg)](https://app.circleci.com/pipelines/github/mrngochuu/AWS-Devops-5?branch=master)
 
 ## Project Overview
 

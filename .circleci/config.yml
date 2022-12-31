@@ -1,140 +1,217 @@
+# Use the latest 2.1 version of CircleCI pipeline process engine. See: https://circleci.com/docs/2.0/configuration-reference
 version: 2.1
-orbs:
-  aws-eks: circleci/aws-eks@2.2.0
-  kubernetes: circleci/kubernetes@1.3
-jobs:
-  linting-code:
-    docker:
-      - image: python:3.7.3-stretch
-    working_directory: ~/repo
-    steps:
-      - checkout
-      - restore_cache:
-          keys:
-            - v1-dependencies-{{ checksum "requirements.txt" }}
-            - v1-dependencies-
-      - run:
-          name: install dependencies
-          command: |
-            python3 -m venv venv
-            . venv/bin/activate
-            make install
-            # Install hadolint
-            wget -O /bin/hadolint https://github.com/hadolint/hadolint/releases/download/v1.16.3/hadolint-Linux-x86_64 &&\
-                chmod +x /bin/hadolint
-      - save_cache:
-          paths:
-            - ./venv
-          key: v1-dependencies-{{ checksum "requirements.txt" }}
-      - run:
-          name: run lint
-          command: |
-            . venv/bin/activate
-            make lint 
-  build-push-docker:
-    docker:
-      - image: circleci/node:13.8.0 
-    working_directory: ~/repo
-    steps:
-      - checkout
-      - restore_cache:
-          keys:
-            - v1-dependencies-{{ checksum "requirements.txt" }}
-            - v1-dependencies-
-      - setup_remote_docker:
-          version: 20.10.14
-          docker_layer_caching: false
-      - run:
-          name: Install dependencies
-          command: |
-            sudo apt-get update && sudo apt-get install -y
-            sudo apt-get install -y curl unzip
-            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip awscliv2.zip
-            sudo ./aws/install
-      - run:
-          name: Build & Push Docker Image in DockerHub
-          command: |
-            echo "Building Docker Image..."
-            docker build --tag $IMAGE_TAG .
-            docker image ls
-            docker login -u="$DOCKERHUB_USERNAME" -p="$DOCKERHUB_PASSWORD"
-            docker tag $IMAGE_TAG $DOCKERHUB_USERNAME/$IMAGE_TAG:$CIRCLE_WORKFLOW_ID
-            docker push $DOCKERHUB_USERNAME/$IMAGE_TAG:$CIRCLE_WORKFLOW_ID
-  
-  deploy-infrastructure:
-    docker:
-      - image: python:3.11-rc-alpine
+
+commands:
+destroy-environment:
+    description: Destroy back-end and front-end cloudformation stacks given a workflow ID.
     parameters:
-      cluster-name:
-        description: |
-          Name of the EKS cluster
-        type: string
-      aws-region:
-        description: |
-          AWS region
-        type: string
-        default: "us-east-1"
+      # Add parameter here
+      workflow_id:
+          type: string
     steps:
-      - checkout
-      - restore_cache:
-          keys:
-            - v1-dependencies-{{ checksum "requirements.txt" }}
-            - v1-dependencies-
       - run:
-          name: Install dependencies
+          name: Destroy environments
+          when: on_fail
           command: |
-            apk add --update ansible tar curl
-            curl -o kubectl https://amazon-eks.s3.us-west-2.amazonaws.com/1.18.8/2020-09-18/bin/linux/amd64/kubectl
-            chmod +x ./kubectl
-            curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
-            mv /tmp/eksctl /usr/local/bin
-            eksctl version
-      - run:
-          name: deploy cluster
-          command: |
-            eksctl create cluster --name cluster-demo --region us-east-1 --nodegroup-name cluster-demo --nodes 2 --ssh-access --ssh-public-key udacity --managed            
-  deploy-config: 
-    docker:
-      - image: 'cimg/base:stable'
-    steps:
-      - checkout
-      - restore_cache:
-          keys:
-            - v1-dependencies-{{ checksum "requirements.txt" }}
-            - v1-dependencies-
-      - setup_remote_docker:
-          version: 20.10.14
-          docker_layer_caching: false
-      - run:
-          name: Install dependencies
-          command: |
-            sudo apt-get update && sudo apt-get install -y
-            sudo apt-get install -y curl unzip
-            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip awscliv2.zip
-            sudo ./aws/install
-      - run:
-          name: set-credential
-          command: |
-            aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
-            aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
-            aws configure set aws_session_token $AWS_SESSION_TOKEN
-            aws configure set region $AWS_DEFAULT_REGION
-      - kubernetes/install-kubectl
-      - aws-eks/update-kubeconfig-with-authenticator:
-          cluster-name: cluster-demo
-          install-kubectl: true
-      - kubernetes/create-or-update-resource:
-          resource-file-path: deployment.yaml
-          show-kubectl-command: true    
+            echo "Destroying environment: << parameters.workflow_id >> "
+            aws s3 rb s3://udapeople-<< parameters.workflow_id >> --force
+            aws cloudformation delete-stack --stack-name "udapeople-frontend-<< parameters.workflow_id >>"
+
+jobs:
+   build:
+      docker:
+         - image: python:3.7.3-stretch
+      steps:
+         - checkout
+         - run:
+            name: Make install
+            command: |
+               cd nginx-hello
+               make install
+
+   test:
+      docker:
+         - image: python:3.7.3-stretch
+      steps:
+         - checkout
+         - run:
+            name: Make install
+            command: |
+               cd nginx-hello
+               make install
+         - run:
+            name: Lint html
+            command: |
+               cd nginx-hello
+               make lint
+
+   docker-build:
+      docker:
+         - image: cimg/go:1.17
+      working_directory: ~/repo
+      steps:
+        - checkout
+        - setup_remote_docker:
+            version: 20.10.14
+            docker_layer_caching: true
+        - run:
+            name: Build & Push Docker Image in DockerHub
+            command: |
+              cd nginx-hello
+              docker build --tag $IMAGE_TAG .
+              docker image ls
+              docker login -u="$DOCKERHUB_USERNAME" -p="$DOCKERHUB_PASSWORD"
+              docker tag $IMAGE_TAG $DOCKERHUB_USERNAME/$IMAGE_TAG:$CIRCLE_WORKFLOW_ID
+              docker push $DOCKERHUB_USERNAME/$IMAGE_TAG:$CIRCLE_WORKFLOW_ID
+
+   deploy-infrastructure:
+      docker:
+         - image: amazon/aws-cli:latest
+      working_directory: ~/repo
+      steps:
+         - checkout
+         - run:
+            name: Ensure front-end infrastructure exist
+            command: |
+               aws cloudformation deploy \
+               --template-file .circleci/files/frontend.yml \
+               --stack-name "udapeople-frontend-${CIRCLE_WORKFLOW_ID:0:7}" \
+               --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}" \
+               --tags project=udapeople-frontend-${CIRCLE_WORKFLOW_ID:0:7} \
+
+   configure-infrastructure:
+      docker:
+         - image: python:3.11-rc-alpine
+      steps:
+         - checkout
+         - restore_cache:
+            keys:
+               - v1-dependencies-{{ checksum "requirements.txt" }}
+               - v1-dependencies-
+         - run:
+            name: Install dependencies
+            command: |
+               apk add --update ansible tar curl
+               curl -o kubectl https://amazon-eks.s3.us-west-2.amazonaws.com/1.18.8/2020-09-18/bin/linux/amd64/kubectl
+               chmod +x ./kubectl
+               curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+               mv /tmp/eksctl /usr/local/bin
+               eksctl version
+         - run:
+            name: deploy cluster
+            command: |
+               export CLUSTER=$(eksctl get cluster --name cluster-demo)
+               echo "Cluster: ${CLUSTER}"
+               if [[ !${CLUSTER} ]]
+               then
+                  eksctl create cluster --name cluster-demo --region us-east-1 --nodegroup-name cluster-demo --nodes 2 --ssh-access --ssh-public-key udacity --managed
+               fi
+
+   deploy-frontend:
+      docker:
+         - image: amazon/aws-cli
+      working_directory: ~/repo
+      steps:
+         - checkout
+         - run:
+            name: Deploy frontend objects
+            command: |
+               aws s3 sync nginx-hello s3://udapeople-${CIRCLE_WORKFLOW_ID:0:7}
+         - destroy-environment:
+            workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
+
+   smoke-test:
+      docker:
+         - image: python:3.7-alpine3.11
+      steps:
+         - checkout
+         - run:
+            name: Install dependencies
+            command: |
+               apk add curl
+         - run:
+            name: Frontend smoke test.
+            command: |
+               # your code here
+               URL="http://udapeople-${CIRCLE_WORKFLOW_ID:0:7}.s3-website-us-east-1.amazonaws.com/"            
+               if curl -s ${URL} | grep "NGINX Logo"
+               then
+                  return 0
+               else
+                  return 1
+               fi
+         - destroy-environment:
+            workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
+
+   cloudfront-update:
+      docker:
+         - image: amazon/aws-cli
+      steps:
+         - checkout
+         - run:
+            name: Save Old Workflow ID to kvdb.io
+            command: |
+               export OLD_WORKFLOW_ID=$(aws cloudformation \
+                     list-exports --query "Exports[?Name==\`WorkflowID\`].Value" \
+                     --no-paginate --output text)
+               echo "Old Wokflow ID: $OLD_WORKFLOW_ID"
+               curl https://kvdb.io/DWvemXSUZC4PtGuacRTrHo/old_workflow_id -d "${OLD_WORKFLOW_ID}"
+         - run:
+            name: Update cloudfront distribution
+            command: |
+               echo ${CIRCLE_WORKFLOW_ID:0:7}
+               aws cloudformation deploy \
+               --template-file .circleci/files/cloudfront.yml \
+               --parameter-overrides WorkflowID="${CIRCLE_WORKFLOW_ID:0:7}" \
+               --stack-name udapeople-cloudfont 
+         - destroy-environment:
+            workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
+
+   cleanup:
+      docker:
+         - image: amazon/aws-cli
+      steps:
+         - checkout
+         - run:
+            name: Get old stack workflow id
+            command: |
+                  # Fetch the Old workflow ID
+               export OldWorkflowID=$(aws cloudformation \
+               list-exports --query "Exports[?Name==\`WorkflowID\`].Value" \
+               --no-paginate --output text)
+               echo OldWorkflowId="${OldWorkflowID}"
+               echo CIRCLE_WORKFLOW_ID "${CIRCLE_WORKFLOW_ID:0:7}"
+               # Fetch the stack names          
+               export STACKS=($(aws cloudformation list-stacks --query "StackSummaries[*].StackName" \
+               --stack-status-filter CREATE_COMPLETE --no-paginate --output text)) 
+               echo StackNames="${STACKS[@]}"
+               if [[ "${OldWorkflowID}" =~ "${CIRCLE_WORKFLOW_ID:0:7}" ]]
+               then
+                  echo "---- start clean ----"
+                  aws s3 rm "s3://udapeople-${CIRCLE_WORKFLOW_ID:0:7}" --recursive
+                  aws cloudformation delete-stack --stack-name "udapeople-frontend-${CIRCLE_WORKFLOW_ID:0:7}"
+               fi
+
 workflows:
-  default:
-    jobs:
-      - linting-code
-      - build-push-docker:
-          requires: [linting-code]
-      - deploy-infrastructure:
-          requires: [build-push-docker]
-      - deploy-config:
-          requires: [deploy-infrastructure]
+   capstone:
+      jobs:
+         - build
+         - test:
+            requires: [build]
+         - docker-build:
+            requires: [test]
+         - deploy-infrastructure:
+            requires: [docker-build]
+            filters:
+               branches:
+                  only: [master]
+         - configure-infrastructure:
+            requires: [deploy-infrastructure]
+         - deploy-frontend:
+            requires: [configure-infrastructure]
+         - smoke-test:
+            requires: [deploy-frontend]
+         - cloudfront-update:
+            requires: [smoke-test]
+         - cleanup:
+            requires: [cloudfront-update]
